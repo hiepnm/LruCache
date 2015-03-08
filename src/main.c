@@ -9,6 +9,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
+#include <errno.h>
 #include "libs/lru.h"
 
 #define NUM_REQUEST_PUSH 1<<20			//30MB request
@@ -38,8 +39,13 @@ void test_set() {
 	}/*all = 50MB*/
 	lruCache *lru = lruCreate(CACHE_SIZE, sizeofElement);
 	clock_t start = clock();
+	int rc;
 	for (i = 0; i < NUM_REQUEST_PUSH; i++) {
-		lruSet(lru, pairs[i].key, pairs[i].value);
+		rc = lruSet(lru, pairs[i].key, pairs[i].value);
+		if (rc==-1){
+			fprintf(stderr, "lruSet: %s\n", lruError(errno));
+			break;
+		}
 	}
 	clock_t elapsedTime = clock() - start;
 	fprintf(stdout, "elapsed time: %ld ns\n", elapsedTime);

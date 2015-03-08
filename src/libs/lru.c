@@ -8,9 +8,12 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <pthread.h>
+#include <errno.h>
+#include <string.h>
+#include <stdio.h>
 #include "lru.h"
 //static uint32_t dict_hash_function_seed = 5381;
-//#include <pthread.h>
 
 element_t *elementCreate(void *key, void *value);
 int elementFree(element_t *e);
@@ -23,9 +26,14 @@ uint64_t lruOverhead();
 
 element_t *elementCreate(void *key, void *value) {
 	if (!key || !value) {
+		if (!key) errno = ERR_LRU_KEY_NULL;
+		else if (!value) errno = ERR_LRU_VALUE_NULL;
 		return NULL;
 	}
 	element_t *e = (element_t*) malloc(sizeof(element_t));
+	if (!e) {
+		return NULL;
+	}
 	e->key = key;
 	e->value = value;
 	e->next = NULL;
@@ -141,24 +149,38 @@ int lruPopFront(lruCache *lru) {
 lruCache* lruCreate(uint64_t maxMem, sizeOfElement *memElement) {
 	uint64_t maxElement = maxMem / (sizeof(element_t) + MAX_PAYLOAD_KEY + MAX_PAYLOAD_VALUE);
 	if (maxElement < MAX_ELEMENT || maxMem < lruOverhead()) {
+		errno = ERR_LRU_CANNOT_CREATE;	//set for errno
 		return NULL;
 	}
 	lruCache *lru = (lruCache*) malloc(sizeof(lruCache));
+	if (!lru) {//errno was set
+		return NULL;
+	}
 	lru->maxMem = maxMem;
 	lru->memElement = memElement;
 	lru->mem = 0;
 	lru->used = 0;
 	lru->maxElement = maxElement;
 	lru->table = (element_t**) malloc(sizeof(element_t*) * lru->maxElement);
+	if (!lru->table) {
+		free(lru);
+		return NULL;
+	}
 	lru->head = NULL;
 	lru->tail = NULL;
-	pthread_mutex_init(&(lru->mutex), NULL);
+
+	int rc = pthread_mutex_init(&(lru->mutex), NULL);
+	if (rc == -1) {	//errno was set
+		free(lru);
+		return NULL;
+	}
 	//pthread_mutex_init(mutex, NULL);
 	return lru;
 }
 
 int lruFree(lruCache *lru) {
 	if (!lru) {
+		errno = ERR_LRU_NULL;
 		return -1;
 	}
 	element_t *e = lru->head;
@@ -167,7 +189,10 @@ int lruFree(lruCache *lru) {
 		elementFree(e);
 		e = lru->head;
 	}
-	pthread_mutex_destroy(&(lru->mutex));
+	int rc = pthread_mutex_destroy(&(lru->mutex));
+	if (rc == -1) {
+		return -1;
+	}
 	free(lru);
 	return 0;
 }
@@ -175,41 +200,78 @@ int lruFree(lruCache *lru) {
 int lruSet(lruCache *lru, void *key, void *value) {
 	uint64_t idx = hashFunction(key, lru->maxElement);
 	if (!lru || lru->table[idx]) {
+		if (!lru) errno = ERR_LRU_NULL;
+		else if (lru->table[idx]) errno = ERR_LRU_KEY_EXISTED;
 		return -1;
 	}
 	element_t *e = elementCreate(key, value);
 	if (!e) {
 		return -1;
 	}
-	pthread_mutex_lock(&lru->mutex);
+	int rc;
+	rc = pthread_mutex_lock(&lru->mutex);
+	if (rc == -1) return -1;
 	int ret = lruAdd(lru, idx, e);
-	pthread_mutex_unlock(&lru->mutex);
+	rc = pthread_mutex_unlock(&lru->mutex);
+	if (rc == -1) return -1;
+
 	return ret;
 }
 
 int lruRemove(lruCache *lru, const void* key) {
 	if (!lru || !key) {
+		if (!lru) errno=ERR_LRU_NULL;
+		else if (!key) errno=ERR_LRU_KEY_NULL;
 		return -1;
 	}
 	uint64_t idx = hashFunction(key, lru->maxElement);
-	pthread_mutex_lock(&lru->mutex);
+	int rc;
+	rc = pthread_mutex_lock(&lru->mutex);
+	if (rc == -1) return -1;
 	element_t *e = lru->table[idx];
 	if (e) {
 		detach(lru, e);
 		free(e);
 	}
-	pthread_mutex_unlock(&lru->mutex);
+	rc = pthread_mutex_unlock(&lru->mutex);
+	if (rc == -1) return -1;
 	return 0;
 }
 
 element_t *lruGet(lruCache *lru, const void* key) {
 	if (!lru || !key) {
+		if (!lru) errno=ERR_LRU_NULL;
+		else if (!key) errno=ERR_LRU_KEY_NULL;
 		return NULL;
 	}
 	uint64_t idx = hashFunction(key, lru->maxElement);
-	pthread_mutex_lock(&lru->mutex);
+	int rc;
+	rc = pthread_mutex_lock(&lru->mutex);
+	if (rc == -1) return NULL;
 	element_t *e = lru->table[idx];
 	lruPushExistingBack(lru, e);
-	pthread_mutex_unlock(&lru->mutex);
+	rc = pthread_mutex_unlock(&lru->mutex);
+	if (rc == -1) return NULL;
 	return e;
+}
+
+char *_lruError(int errorNum) {
+	char *ret = (char*)malloc(100*sizeof(char));
+	if (!ret) {
+		perror("Memory for Error");
+		exit(EXIT_FAILURE);
+	}
+	switch (errorNum) {
+	case ERR_LRU_NULL: strcpy(ret, ERM_LRU_NULL); break;
+	case ERR_LRU_CANNOT_CREATE: strcpy(ret, ERM_LRU_CANNOT_CREATE); break;
+	case ERR_LRU_KEY_NULL: strcpy(ret, ERM_LRU_KEY_NULL); break;
+	case ERR_LRU_VALUE_NULL: strcpy(ret, ERM_LRU_VALUE_NULL); break;
+	case ERR_LRU_KEY_EXISTED: strcpy(ret, ERM_LRU_KEY_EXISTED); break;
+	default: strcpy(ret, ERM_LRU_NO_ERROR);
+	}
+	return ret;
+}
+
+char *lruError(int errorNum) {
+	return errorNum < MAX_OF_ERRNO_ON_SYSTEM ? strerror(errorNum) : _lruError(errorNum);
 }
