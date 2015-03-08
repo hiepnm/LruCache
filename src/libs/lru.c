@@ -152,6 +152,7 @@ lruCache* lruCreate(uint64_t maxMem, sizeOfElement *memElement) {
 	lru->table = (element_t**) malloc(sizeof(element_t*) * lru->maxElement);
 	lru->head = NULL;
 	lru->tail = NULL;
+	pthread_mutex_init(&(lru->mutex), NULL);
 	//pthread_mutex_init(mutex, NULL);
 	return lru;
 }
@@ -166,6 +167,7 @@ int lruFree(lruCache *lru) {
 		elementFree(e);
 		e = lru->head;
 	}
+	pthread_mutex_destroy(&(lru->mutex));
 	free(lru);
 	return 0;
 }
@@ -179,9 +181,9 @@ int lruSet(lruCache *lru, void *key, void *value) {
 	if (!e) {
 		return -1;
 	}
-	//pthread_mutex_lock(mutex);
+	pthread_mutex_lock(&lru->mutex);
 	int ret = lruAdd(lru, idx, e);
-	//pthread_mutex_unlock(mutex);
+	pthread_mutex_unlock(&lru->mutex);
 	return ret;
 }
 
@@ -190,13 +192,13 @@ int lruRemove(lruCache *lru, const void* key) {
 		return -1;
 	}
 	uint64_t idx = hashFunction(key, lru->maxElement);
-	//pthread_mutex_lock(mutex);
+	pthread_mutex_lock(&lru->mutex);
 	element_t *e = lru->table[idx];
 	if (e) {
 		detach(lru, e);
 		free(e);
 	}
-	//pthread_mutex_unlock(mutex);
+	pthread_mutex_unlock(&lru->mutex);
 	return 0;
 }
 
@@ -205,9 +207,9 @@ element_t *lruGet(lruCache *lru, const void* key) {
 		return NULL;
 	}
 	uint64_t idx = hashFunction(key, lru->maxElement);
-	//pthread_mutex_lock(mutex);
+	pthread_mutex_lock(&lru->mutex);
 	element_t *e = lru->table[idx];
 	lruPushExistingBack(lru, e);
-	//pthread_mutex_unlock(mutex);
+	pthread_mutex_unlock(&lru->mutex);
 	return e;
 }

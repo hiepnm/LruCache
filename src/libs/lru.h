@@ -8,6 +8,7 @@
 #ifndef LIBS_LRU_H_
 #define LIBS_LRU_H_
 #include <stdint.h>
+#include <pthread.h>
 #define MAX_PAYLOAD_KEY 10
 #define MAX_PAYLOAD_VALUE 1024
 #define MAX_ELEMENT 512
@@ -29,6 +30,7 @@ typedef struct lruCache {
 	element_t *head;
 	element_t *tail;
 	sizeOfElement *memElement;
+	pthread_mutex_t mutex;
 } lruCache;
 /*API*/
 lruCache* lruCreate(uint64_t maxMem, sizeOfElement *memElement);
