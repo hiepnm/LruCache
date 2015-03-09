@@ -12,17 +12,18 @@
 #include <errno.h>
 #include "libs/lru.h"
 
-#define NUM_REQUEST_PUSH 1<<20			//30MB request
-#define CACHE_SIZE 10 * 1<<20				//10MB
+#define ONE_MEGABYTE 1<<20
+#define NUM_REQUEST_PUSH ONE_MEGABYTE			//30MB request
+#define CACHE_SIZE 10 * ONE_MEGABYTE				//10MB
 
-static uint64_t length_key(const uint64_t key) {
-	return sizeof(key);
+static uint64_t length_key(const void *key) {
+	return sizeof(uint64_t);
 }
 static uint64_t length_value(char* value) {
 	return sizeof(char) * strlen(value);
 }
 uint64_t sizeofElement(element_t *e) {
-	return sizeof(element_t) + length_key(*((uint64_t*)e->key)) + length_value((char*)(e->value));
+	return sizeof(element_t) + length_key(e->key) + length_value((char*)(e->value));
 }
 typedef struct pairtest_t {
 	uint64_t *key;
@@ -37,7 +38,11 @@ void test_set() {
 		pairs[i].value = (char*)malloc(11*sizeof(char));
 		strcpy(pairs[i].value, "0123456789");
 	}/*all = 50MB*/
-	lruCache *lru = lruCreate(CACHE_SIZE, sizeofElement);
+	lruCache *lru = lruCreate(CACHE_SIZE, sizeofElement, length_key);
+	fprintf(stderr, "lruCache: %p\n",lru);
+	fprintf(stderr, "memory size = %ld MB\n",(lru->maxMem)/ONE_MEGABYTE);
+	fprintf(stderr, "maxElement = %ld\n",lru->maxElement);
+	fprintf(stderr, "-----------------------------------------------\n");
 	clock_t start = clock();
 	int rc;
 	for (i = 0; i < NUM_REQUEST_PUSH; i++) {
@@ -48,7 +53,7 @@ void test_set() {
 		}
 	}
 	clock_t elapsedTime = clock() - start;
-	fprintf(stdout, "elapsed time: %ld ns\n", elapsedTime);
+	fprintf(stderr, "elapsed time: %ld ns\n", elapsedTime);
 	/*free all*/
 	lruFree(lru);
 	free(pairs);

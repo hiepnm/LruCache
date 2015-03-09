@@ -47,8 +47,16 @@ int elementFree(element_t *e) {
 	return 0;
 }
 
-uint64_t hashFunction(const void* key, uint64_t len) {
-	return (*(uint64_t*)key)%len;
+uint64_t hashFunction(lruCache *lru, const void* key) {
+	uint32_t hash = 5381; //use jdb2 hash function.
+	int c;
+	uint64_t lenKey = lru->lenKey(key);
+	while (lenKey--){
+		c = (*(uint64_t*)key)++;
+		hash = ((hash << 5) + hash) + c; /* hash * 33 + c */
+	}
+	return hash%lru->maxElement;
+//	return (*(uint64_t*)key)%lru->maxElement;
 }
 
 uint64_t sizeOfLruCache(lruCache *lru) {
@@ -146,9 +154,9 @@ int lruPopFront(lruCache *lru) {
 }
 //pthread_mutex_t *mutex;
 /************************* API Implementation ********************************************/
-lruCache* lruCreate(uint64_t maxMem, sizeOfElement *memElement) {
-	uint64_t maxElement = maxMem / (sizeof(element_t) + MAX_PAYLOAD_KEY + MAX_PAYLOAD_VALUE);
-	if (maxElement < MAX_ELEMENT || maxMem < lruOverhead()) {
+lruCache* lruCreate(uint64_t maxMem, sizeOfElement *memElement, sizeOfKey *lenKey) {
+	uint64_t maxElement = maxMem / (sizeof(element_t) + MIN_PAYLOAD_KEY + MIN_PAYLOAD_VALUE);
+	if (maxElement < MIN_ELEMENTS || maxMem < lruOverhead()) {
 		errno = ERR_LRU_CANNOT_CREATE;	//set for errno
 		return NULL;
 	}
@@ -158,6 +166,7 @@ lruCache* lruCreate(uint64_t maxMem, sizeOfElement *memElement) {
 	}
 	lru->maxMem = maxMem;
 	lru->memElement = memElement;
+	lru->lenKey = lenKey;
 	lru->mem = 0;
 	lru->used = 0;
 	lru->maxElement = maxElement;
@@ -198,23 +207,25 @@ int lruFree(lruCache *lru) {
 }
 
 int lruSet(lruCache *lru, void *key, void *value) {
-	uint64_t idx = hashFunction(key, lru->maxElement);
-	if (!lru || lru->table[idx]) {
+	if (!lru) {
 		if (!lru) errno = ERR_LRU_NULL;
-		else if (lru->table[idx]) errno = ERR_LRU_KEY_EXISTED;
 		return -1;
 	}
-	element_t *e = elementCreate(key, value);
-	if (!e) {
-		return -1;
+	int ret;
+	uint64_t idx = hashFunction(lru, key);
+	element_t *e = lru->table[idx];
+	if (e) {	//update
+		ret = lruPushExistingBack(lru, e);
+	} else {	//new
+		e = elementCreate(key, value);
+		if (!e)
+			return -1;
+		int rc = pthread_mutex_lock(&lru->mutex);
+		if (rc == -1) return -1;
+		ret = lruAdd(lru, idx, e);
+		rc = pthread_mutex_unlock(&lru->mutex);
+		if (rc == -1) return -1;
 	}
-	int rc;
-	rc = pthread_mutex_lock(&lru->mutex);
-	if (rc == -1) return -1;
-	int ret = lruAdd(lru, idx, e);
-	rc = pthread_mutex_unlock(&lru->mutex);
-	if (rc == -1) return -1;
-
 	return ret;
 }
 
@@ -224,7 +235,7 @@ int lruRemove(lruCache *lru, const void* key) {
 		else if (!key) errno=ERR_LRU_KEY_NULL;
 		return -1;
 	}
-	uint64_t idx = hashFunction(key, lru->maxElement);
+	uint64_t idx = hashFunction(lru, key);
 	int rc;
 	rc = pthread_mutex_lock(&lru->mutex);
 	if (rc == -1) return -1;
@@ -244,7 +255,7 @@ element_t *lruGet(lruCache *lru, const void* key) {
 		else if (!key) errno=ERR_LRU_KEY_NULL;
 		return NULL;
 	}
-	uint64_t idx = hashFunction(key, lru->maxElement);
+	uint64_t idx = hashFunction(lru, key);
 	int rc;
 	rc = pthread_mutex_lock(&lru->mutex);
 	if (rc == -1) return NULL;
