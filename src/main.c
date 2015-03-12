@@ -12,7 +12,7 @@
 #include <errno.h>
 #include "libs/lru.h"
 
-#define ONE_MEGABYTE 1<<20
+#define ONE_MEGABYTE (1<<20)
 #define NUM_REQUEST_PUSH ONE_MEGABYTE			//30MB request
 #define CACHE_SIZE 10 * ONE_MEGABYTE				//10MB
 

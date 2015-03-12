@@ -13,7 +13,6 @@
 #include <string.h>
 #include <stdio.h>
 #include "lru.h"
-//static uint32_t dict_hash_function_seed = 5381;
 
 element_t *elementCreate(void *key, void *value);
 int elementFree(element_t *e);
@@ -215,6 +214,8 @@ int lruSet(lruCache *lru, void *key, void *value) {
 	uint64_t idx = hashFunction(lru, key);
 	element_t *e = lru->table[idx];
 	if (e) {	//update
+		e->key = key;
+		e->value = value;
 		ret = lruPushExistingBack(lru, e);
 	} else {	//new
 		e = elementCreate(key, value);
